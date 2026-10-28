@@ -1,0 +1,62 @@
+# Xcode
+## User settings
+xcuserdata/
+*.xcscmblueprint
+*.xcuserstate
+*.xcuserdatad
+
+## Build generated
+DerivedData/
+build/
+*.build/
+*.xcarchive
+*.ipa
+*.zip
+*.dSYM.zip
+*.dSYM
+
+## Various cache & temporary files
+*.hmap
+*.playgroundlog
+
+## Swift Package Manager
+.build/
+Packages/
+Package.pins
+Package.resolved
+.swiftpm/
+
+## CocoaPods
+Pods/
+Podfile.lock
+
+## Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/test_output
+
+## Code Signing & Certificates (Security)
+*.cer
+*.cert
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
+*.key
+*.pem
+*.jks
+*.keystore
+
+## macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+## Environment & Secrets
+.env
+.env.*
+*.secret
