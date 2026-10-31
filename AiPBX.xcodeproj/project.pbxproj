@@ -30,6 +30,7 @@
 		DAE5E17C39DE5B1DAF02FC11 /* GroupDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518AB192C4B2E9FF3E2462B3 /* GroupDetailsView.swift */; };
 		0634B6C640DF1A3338B97DA0 /* NewGroupChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E197DD8184A2F09A3394A593 /* NewGroupChatView.swift */; };
 		3E625D3A9DC47693C8F9D70D /* AvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF50900A53FDF033B20D206B /* AvatarView.swift */; };
+		45CAD1EAF15249089778F451 /* ImageViewerOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DD451B61513EFD542BEB5CC /* ImageViewerOverlay.swift */; };
 		9C0E513F0FDD605F488448A6 /* SearchBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AF8C053D02ACBD089EF9C14 /* SearchBarView.swift */; };
 		E5E7AEB94B377946B1CDB811 /* StatusBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD74038EECB8E680E2178671 /* StatusBadgeView.swift */; };
 		50F2687024C41CEB277B406E /* ContactRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40A0A59334E2003F34F09EAE /* ContactRowView.swift */; };
@@ -79,6 +80,7 @@
 		518AB192C4B2E9FF3E2462B3 /* GroupDetailsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GroupDetailsView.swift"; sourceTree = "<group>"; };
 		E197DD8184A2F09A3394A593 /* NewGroupChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NewGroupChatView.swift"; sourceTree = "<group>"; };
 		EF50900A53FDF033B20D206B /* AvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AvatarView.swift"; sourceTree = "<group>"; };
+		0DD451B61513EFD542BEB5CC /* ImageViewerOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ImageViewerOverlay.swift"; sourceTree = "<group>"; };
 		2AF8C053D02ACBD089EF9C14 /* SearchBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SearchBarView.swift"; sourceTree = "<group>"; };
 		BD74038EECB8E680E2178671 /* StatusBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "StatusBadgeView.swift"; sourceTree = "<group>"; };
 		40A0A59334E2003F34F09EAE /* ContactRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ContactRowView.swift"; sourceTree = "<group>"; };
@@ -231,6 +233,7 @@
 			isa = PBXGroup;
 			children = (
 				EF50900A53FDF033B20D206B /* AvatarView.swift */,
+				0DD451B61513EFD542BEB5CC /* ImageViewerOverlay.swift */,
 				2AF8C053D02ACBD089EF9C14 /* SearchBarView.swift */,
 				BD74038EECB8E680E2178671 /* StatusBadgeView.swift */,
 			);
@@ -521,6 +524,7 @@
 				DAE5E17C39DE5B1DAF02FC11 /* GroupDetailsView.swift in Sources */,
 				0634B6C640DF1A3338B97DA0 /* NewGroupChatView.swift in Sources */,
 				3E625D3A9DC47693C8F9D70D /* AvatarView.swift in Sources */,
+				45CAD1EAF15249089778F451 /* ImageViewerOverlay.swift in Sources */,
 				9C0E513F0FDD605F488448A6 /* SearchBarView.swift in Sources */,
 				E5E7AEB94B377946B1CDB811 /* StatusBadgeView.swift in Sources */,
 				50F2687024C41CEB277B406E /* ContactRowView.swift in Sources */,
@@ -589,7 +593,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 74;
+				CURRENT_PROJECT_VERSION = 75;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = AiPBX/Resources/Info.plist;
@@ -598,7 +602,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.74;
+				MARKETING_VERSION = 1.50.35;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mhrgl.AiPBX;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -613,7 +617,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 74;
+				CURRENT_PROJECT_VERSION = 75;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = AiPBX/Resources/Info.plist;
@@ -622,7 +626,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.74;
+				MARKETING_VERSION = 1.50.35;
 				PRODUCT_BUNDLE_IDENTIFIER = com.mhrgl.AiPBX;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

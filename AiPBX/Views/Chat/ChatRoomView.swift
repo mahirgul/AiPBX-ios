@@ -16,6 +16,7 @@ public struct ChatRoomView: View {
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
     @State private var showFileImporter: Bool = false
     @State private var isUploading: Bool = false
+    @State private var previewImageUrl: URL? = nil
 
     public init(conversation: ChatConversation) {
         self.conversation = conversation
@@ -31,7 +32,12 @@ public struct ChatRoomView: View {
                             ChatMessageBubbleView(
                                 message: msg,
                                 isGroup: conversation.isGroup,
-                                onDelete: canDelete(msg) ? { messageToDelete = msg } : nil
+                                onDelete: canDelete(msg) ? { messageToDelete = msg } : nil,
+                                onImageTap: { url in
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        previewImageUrl = url
+                                    }
+                                }
                             )
                             .id(msg.id)
                         }
@@ -194,6 +200,15 @@ public struct ChatRoomView: View {
             Button(L("OK"), role: .cancel) {}
         } message: {
             Text(deleteError ?? "")
+        }
+        .overlay {
+            if let url = previewImageUrl {
+                ImageViewerOverlay(imageUrl: url, onDismiss: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        previewImageUrl = nil
+                    }
+                })
+            }
         }
     }
 

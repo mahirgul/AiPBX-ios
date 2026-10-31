@@ -9,6 +9,13 @@ def gen_id(name):
 root_dir = os.path.abspath(os.path.dirname(__file__))
 app_dir = os.path.join(root_dir, "AiPBX")
 
+version_file = os.path.join(root_dir, "VERSION")
+app_version = "1.50.35"
+if os.path.isfile(version_file):
+    with open(version_file, "r", encoding="utf-8") as vf:
+        app_version = vf.read().strip() or "1.50.35"
+build_number = "75"
+
 swift_files = []
 resource_files = []
 
@@ -403,7 +410,7 @@ out.append("\t\t\tbuildSettings = {")
 out.append("\t\t\t\tASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;")
 out.append("\t\t\t\tASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;")
 out.append("\t\t\t\tCODE_SIGN_STYLE = Automatic;")
-out.append("\t\t\t\tCURRENT_PROJECT_VERSION = 74;")
+out.append(f"\t\t\t\tCURRENT_PROJECT_VERSION = {build_number};")
 out.append("\t\t\t\tENABLE_PREVIEWS = YES;")
 out.append("\t\t\t\tGENERATE_INFOPLIST_FILE = NO;")
 out.append("\t\t\t\tINFOPLIST_FILE = AiPBX/Resources/Info.plist;")
@@ -412,7 +419,7 @@ out.append("\t\t\t\tLD_RUNPATH_SEARCH_PATHS = (")
 out.append("\t\t\t\t\t\"$(inherited)\",")
 out.append("\t\t\t\t\t\"@executable_path/Frameworks\",")
 out.append("\t\t\t\t);")
-out.append("\t\t\t\tMARKETING_VERSION = 1.0.74;")
+out.append(f"\t\t\t\tMARKETING_VERSION = {app_version};")
 out.append("\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.mhrgl.AiPBX;")
 out.append("\t\t\t\tPRODUCT_NAME = \"$(TARGET_NAME)\";")
 out.append("\t\t\t\tSWIFT_EMIT_LOC_STRINGS = YES;")
@@ -429,7 +436,7 @@ out.append("\t\t\tbuildSettings = {")
 out.append("\t\t\t\tASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;")
 out.append("\t\t\t\tASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;")
 out.append("\t\t\t\tCODE_SIGN_STYLE = Automatic;")
-out.append("\t\t\t\tCURRENT_PROJECT_VERSION = 74;")
+out.append(f"\t\t\t\tCURRENT_PROJECT_VERSION = {build_number};")
 out.append("\t\t\t\tENABLE_PREVIEWS = YES;")
 out.append("\t\t\t\tGENERATE_INFOPLIST_FILE = NO;")
 out.append("\t\t\t\tINFOPLIST_FILE = AiPBX/Resources/Info.plist;")
@@ -438,7 +445,7 @@ out.append("\t\t\t\tLD_RUNPATH_SEARCH_PATHS = (")
 out.append("\t\t\t\t\t\"$(inherited)\",")
 out.append("\t\t\t\t\t\"@executable_path/Frameworks\",")
 out.append("\t\t\t\t);")
-out.append("\t\t\t\tMARKETING_VERSION = 1.0.74;")
+out.append(f"\t\t\t\tMARKETING_VERSION = {app_version};")
 out.append("\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.mhrgl.AiPBX;")
 out.append("\t\t\t\tPRODUCT_NAME = \"$(TARGET_NAME)\";")
 out.append("\t\t\t\tSWIFT_EMIT_LOC_STRINGS = YES;")

@@ -7,11 +7,14 @@ public struct ChatMessageBubbleView: View {
     public let isGroup: Bool
     /// Set for the user's own messages that can be deleted.
     public let onDelete: (() -> Void)?
+    /// Set when an image in the bubble is tapped.
+    public let onImageTap: ((URL) -> Void)?
 
-    public init(message: ChatMessage, isGroup: Bool = false, onDelete: (() -> Void)? = nil) {
+    public init(message: ChatMessage, isGroup: Bool = false, onDelete: (() -> Void)? = nil, onImageTap: ((URL) -> Void)? = nil) {
         self.message = message
         self.isGroup = isGroup
         self.onDelete = onDelete
+        self.onImageTap = onImageTap
     }
 
     private var isDeleted: Bool {
@@ -85,7 +88,11 @@ public struct ChatMessageBubbleView: View {
                                             .frame(maxWidth: 220, maxHeight: 220)
                                             .cornerRadius(10)
                                             .onTapGesture {
-                                                UIApplication.shared.open(url)
+                                                if let onImageTap = onImageTap {
+                                                    onImageTap(url)
+                                                } else {
+                                                    UIApplication.shared.open(url)
+                                                }
                                             }
                                     case .failure:
                                         Text(L("Could not load the photo"))
