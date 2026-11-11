@@ -14,7 +14,8 @@ A native iOS client for an AiPBX server: calls over WebRTC, chat, call history a
 1. **Keypad:** 3x4 DTMF keypad and dialling, SIP registration status (connected, connecting, not connected); the call screen (`ActiveCallView`) with mute, keypad, speaker, hold and a call timer; iOS system call and lock screen integration (`CallKit`, `AudioSessionManager`).
 2. **History:** the PBX call records (`/api/mobile/call_history.php`), filters for all, missed, incoming and outgoing, call back with one tap.
 3. **Contacts:** the PBX directory (`/api/mobile/contacts.php`) with presence and role badges; call or chat with one tap.
-4. **Chat:** direct and group chats over `URLSessionWebSocketTask` (messages, typing, presence), group management, filters for all, direct and groups.
+4. **Chat:** direct and group chats over `URLSessionWebSocketTask` (messages, typing, presence), group management, filters for all, direct and groups. Tap an image to open the native full-screen viewer;
+   pinch to zoom, pan while zoomed, double-tap to toggle zoom, or use the share sheet after download.
 5. **PBX:** do-not-disturb (`/api/mobile/features.php`), call forwarding (always, busy, no answer) with ring time (10–45 s), the in-app log viewer (`LogViewerView`, `AppLogManager`) with export through the share sheet.
 
 ## Push Notifications (APNs + PushKit VoIP)
@@ -40,8 +41,12 @@ The unsigned IPA of CI has no `aps-environment` entitlement; to receive pushes t
 
 - **Triggers:** pushes and pull requests to `main`, or manual run via *Run workflow*.
 - **Artifacts:**
-  - `AiPBX-unsigned.ipa`: installs on devices through TrollStore, AltStore, Sideloadly or an enterprise MDM.
+  - `AiPBX-unsigned.ipa`: a device build for an appropriate sideloading/signing workflow. It is not an App Store release; ordinary device installation requires a valid signing/provisioning setup.
   - `AiPBX-Simulator.zip`: an `.app` to drag into the Xcode simulator.
+
+The client has its own repository, version and release workflow. Publishing a server release does
+not build or publish an iOS store version. Release events in this repository (or the manual
+`release_tag` input) can attach build artifacts to the selected GitHub Release.
 
 ## Building on a Mac
 
