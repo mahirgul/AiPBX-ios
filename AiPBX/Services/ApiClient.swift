@@ -72,39 +72,20 @@ public final class ApiClient {
         }
 
         let refreshKey = "\(cleanBase)|\(token)"
-        refreshLock.lock()
-        let refreshTask: Task<LoginResponse, Error>
-        if let existing = inFlightRefreshes[refreshKey] {
-            refreshTask = existing
-            refreshLock.unlock()
-        } else {
-            let task = Task<LoginResponse, Error> {
+        let refreshTask = getOrCreateRefreshTask(for: refreshKey) {
+            Task<LoginResponse, Error> { [weak self] in
                 defer {
-                    self.refreshLock.lock()
-                    _ = self.inFlightRefreshes.removeValue(forKey: refreshKey)
-                    self.refreshLock.unlock()
+                    self?.removeRefreshTask(for: refreshKey)
                 }
+                guard let self = self else { throw ApiError.unknown }
                 return try await self.refreshSession(baseUrl: cleanBase, token: token)
             }
-            inFlightRefreshes[refreshKey] = task
-            refreshTask = task
-            refreshLock.unlock()
         }
 
         do {
             let refreshed = try await refreshTask.value
             if let newToken = refreshed.token, !newToken.isEmpty {
-                var shouldNotify = false
-                refreshLock.lock()
-                // Re-verify session hasn't been logged out or switched while refresh was running
-                if let current = SessionStore.load(),
-                   cleanUrl(current.baseUrl) == cleanBase,
-                   current.token == token {
-                    SessionStore.save(baseUrl: cleanBase, token: newToken, generation: current.generation)
-                    shouldNotify = true
-                }
-                refreshLock.unlock()
-
+                let shouldNotify = updateSessionIfCurrent(cleanBase: cleanBase, originalToken: token, newToken: newToken)
                 if shouldNotify {
                     onTokenRefreshed?(cleanBase, token, refreshed)
                     // Retry request ONLY if target URL starts with the matching server baseUrl
@@ -116,16 +97,7 @@ public final class ApiClient {
                 }
             }
         } catch ApiError.serverError(let code, _) where code == 401 || code == 403 {
-            var shouldNotify = false
-            refreshLock.lock()
-            if let current = SessionStore.load(),
-               cleanUrl(current.baseUrl) == cleanBase,
-               current.token == token {
-                SessionStore.clear()
-                shouldNotify = true
-            }
-            refreshLock.unlock()
-
+            let shouldNotify = clearSessionIfCurrent(cleanBase: cleanBase, originalToken: token)
             if shouldNotify {
                 onSessionRejected?(cleanBase, token)
             }
@@ -134,6 +106,50 @@ public final class ApiClient {
         }
 
         return (data, response)
+    }
+
+    private func getOrCreateRefreshTask(
+        for key: String,
+        factory: () -> Task<LoginResponse, Error>
+    ) -> Task<LoginResponse, Error> {
+        refreshLock.lock()
+        defer { refreshLock.unlock() }
+        if let existing = inFlightRefreshes[key] {
+            return existing
+        }
+        let task = factory()
+        inFlightRefreshes[key] = task
+        return task
+    }
+
+    private func removeRefreshTask(for key: String) {
+        refreshLock.lock()
+        defer { refreshLock.unlock() }
+        inFlightRefreshes.removeValue(forKey: key)
+    }
+
+    private func updateSessionIfCurrent(cleanBase: String, originalToken: String, newToken: String) -> Bool {
+        refreshLock.lock()
+        defer { refreshLock.unlock() }
+        if let current = SessionStore.load(),
+           cleanUrl(current.baseUrl) == cleanBase,
+           current.token == originalToken {
+            SessionStore.save(baseUrl: cleanBase, token: newToken, generation: current.generation)
+            return true
+        }
+        return false
+    }
+
+    private func clearSessionIfCurrent(cleanBase: String, originalToken: String) -> Bool {
+        refreshLock.lock()
+        defer { refreshLock.unlock() }
+        if let current = SessionStore.load(),
+           cleanUrl(current.baseUrl) == cleanBase,
+           current.token == originalToken {
+            SessionStore.clear()
+            return true
+        }
+        return false
     }
 
     // MARK: - Server Ping & Login
