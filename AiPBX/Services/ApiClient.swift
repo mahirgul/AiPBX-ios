@@ -77,7 +77,7 @@ public final class ApiClient {
                 defer {
                     self?.removeRefreshTask(for: refreshKey)
                 }
-                guard let self = self else { throw ApiError.unknown }
+                guard let self = self else { throw ApiError.custom("ApiClient deallocated") }
                 return try await self.refreshSession(baseUrl: cleanBase, token: token)
             }
         }
