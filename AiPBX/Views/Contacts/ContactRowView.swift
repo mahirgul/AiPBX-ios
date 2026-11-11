@@ -3,11 +3,13 @@ import SwiftUI
 public struct ContactRowView: View {
     public let contact: ContactItem
     public let onCall: () -> Void
+    public let onVideoCall: (() -> Void)?
     public let onChat: () -> Void
 
-    public init(contact: ContactItem, onCall: @escaping () -> Void, onChat: @escaping () -> Void) {
+    public init(contact: ContactItem, onCall: @escaping () -> Void, onVideoCall: (() -> Void)? = nil, onChat: @escaping () -> Void) {
         self.contact = contact
         self.onCall = onCall
+        self.onVideoCall = onVideoCall
         self.onChat = onChat
     }
 
@@ -70,6 +72,18 @@ public struct ContactRowView: View {
                 if !isDeviceContact {
                     Button(action: onChat) {
                         Image(systemName: "bubble.left.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.blue)
+                            .padding(8)
+                            .background(Color.blue.opacity(0.12))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(BorderlessButtonStyle())
+                }
+
+                if let onVideoCall = onVideoCall {
+                    Button(action: onVideoCall) {
+                        Image(systemName: "video.fill")
                             .font(.system(size: 18))
                             .foregroundColor(.blue)
                             .padding(8)

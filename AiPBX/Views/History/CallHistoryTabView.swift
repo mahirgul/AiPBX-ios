@@ -76,9 +76,11 @@ public struct CallHistoryTabView: View {
                     List {
                         ForEach(filteredCalls) { call in
                             if !(call.callKey ?? "").isEmpty {
-                                CallRecordRowView(call: call) {
-                                    appState.makeCall(to: call.party)
-                                }
+                                CallRecordRowView(call: call, onCallBack: {
+                                    appState.makeCall(to: call.party, withVideo: false)
+                                }, onVideoCallBack: appState.isVideoCallsEnabled ? {
+                                    appState.makeCall(to: call.party, withVideo: true)
+                                } : nil)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                     Button(role: .destructive) {
                                         removeCall(call)
@@ -87,9 +89,11 @@ public struct CallHistoryTabView: View {
                                     }
                                 }
                             } else {
-                                CallRecordRowView(call: call) {
-                                    appState.makeCall(to: call.party)
-                                }
+                                CallRecordRowView(call: call, onCallBack: {
+                                    appState.makeCall(to: call.party, withVideo: false)
+                                }, onVideoCallBack: appState.isVideoCallsEnabled ? {
+                                    appState.makeCall(to: call.party, withVideo: true)
+                                } : nil)
                             }
                         }
                     }

@@ -3,10 +3,12 @@ import SwiftUI
 public struct CallRecordRowView: View {
     public let call: CallRecord
     public let onCallBack: () -> Void
+    public let onVideoCallBack: (() -> Void)?
 
-    public init(call: CallRecord, onCallBack: @escaping () -> Void) {
+    public init(call: CallRecord, onCallBack: @escaping () -> Void, onVideoCallBack: (() -> Void)? = nil) {
         self.call = call
         self.onCallBack = onCallBack
+        self.onVideoCallBack = onVideoCallBack
     }
 
     private var directionIcon: (name: String, color: Color) {
@@ -67,12 +69,23 @@ public struct CallRecordRowView: View {
                         .foregroundColor(.secondary)
                 }
 
-                Button(action: onCallBack) {
-                    Image(systemName: "phone.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundColor(.green)
+                HStack(spacing: 8) {
+                    if let onVideoCallBack = onVideoCallBack {
+                        Button(action: onVideoCallBack) {
+                            Image(systemName: "video.circle.fill")
+                                .font(.system(size: 26))
+                                .foregroundColor(.blue)
+                        }
+                        .buttonStyle(BorderlessButtonStyle())
+                    }
+
+                    Button(action: onCallBack) {
+                        Image(systemName: "phone.circle.fill")
+                            .font(.system(size: 26))
+                            .foregroundColor(.green)
+                    }
+                    .buttonStyle(BorderlessButtonStyle())
                 }
-                .buttonStyle(BorderlessButtonStyle())
             }
         }
         .padding(.vertical, 4)

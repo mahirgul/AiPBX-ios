@@ -70,8 +70,10 @@ public struct ContactsTabView: View {
                     List {
                         ForEach(filteredContacts) { contact in
                             ContactRowView(contact: contact, onCall: {
-                                appState.makeCall(to: contact.extensionNumber)
-                            }, onChat: {
+                                appState.makeCall(to: contact.extensionNumber, withVideo: false)
+                            }, onVideoCall: appState.isVideoCallsEnabled ? {
+                                appState.makeCall(to: contact.extensionNumber, withVideo: true)
+                            } : nil, onChat: {
                                 openChatWith(contact: contact)
                             })
                         }

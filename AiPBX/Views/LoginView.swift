@@ -330,6 +330,7 @@ public struct LoginView: View {
             appState.errorMessage = L("Please enter a valid PBX server address.")
             return
         }
+        appState.startExternalAuth(serverUrl: cleanBase)
         UIApplication.shared.open(authUrl)
     }
 

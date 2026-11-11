@@ -32,11 +32,15 @@ public final class ApiClient {
     public static let shared = ApiClient()
 
     /// Called when a 401 triggers a reactive token refresh so AppState can update its in-memory token.
-    public var onTokenRefreshed: ((LoginResponse) -> Void)?
+    /// Carries the server address and previous token so receivers ignore stale/crossed refreshes.
+    public var onTokenRefreshed: ((_ baseUrl: String, _ oldToken: String, LoginResponse) -> Void)?
     /// Called when refresh.php rejects the saved session with 401/403.
-    public var onSessionRejected: (() -> Void)?
+    /// Carries the server address and rejected token so receivers only act if still on that session.
+    public var onSessionRejected: ((_ baseUrl: String, _ rejectedToken: String) -> Void)?
 
     private let session: URLSession
+    private let refreshLock = NSLock()
+    private var inFlightRefreshes: [String: Task<LoginResponse, Error>] = [:]
 
     private init() {
         let config = URLSessionConfiguration.default
@@ -50,28 +54,85 @@ public final class ApiClient {
     }
 
     /// Executes an authenticated request and reactively refreshes the token once on HTTP 401.
-    private func performAuthenticated(_ request: URLRequest) async throws -> (Data, URLResponse) {
+    /// Strictly bound to the originating server address and session token to prevent cross-account/cross-server token leakage.
+    private func performAuthenticated(_ request: URLRequest, baseUrl: String, token: String) async throws -> (Data, URLResponse) {
         let (data, response) = try await session.data(for: request)
-        if let http = response as? HTTPURLResponse,
-           http.statusCode == 401,
-           let saved = SessionStore.load(),
-           !saved.token.isEmpty {
-            do {
-                let refreshed = try await refreshSession(baseUrl: saved.baseUrl, token: saved.token)
-                if let newToken = refreshed.token, !newToken.isEmpty {
-                    SessionStore.save(baseUrl: saved.baseUrl, token: newToken)
-                    onTokenRefreshed?(refreshed)
-                    var retry = request
-                    retry.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
-                    return try await session.data(for: retry)
-                }
-            } catch ApiError.serverError(let code, _) where code == 401 || code == 403 {
-                SessionStore.clear()
-                onSessionRejected?()
-            } catch {
-                // Keep original 401 response on transient refresh errors
-            }
+        guard let http = response as? HTTPURLResponse, http.statusCode == 401 else {
+            return (data, response)
         }
+
+        let cleanBase = cleanUrl(baseUrl)
+        // 1. Verify that the session being refreshed is still the active session in SessionStore.
+        guard let saved = SessionStore.load(),
+              cleanUrl(saved.baseUrl) == cleanBase,
+              saved.token == token,
+              !saved.token.isEmpty else {
+            // The session has changed or been logged out; do not touch Keychain and do not send token elsewhere.
+            return (data, response)
+        }
+
+        let refreshKey = "\(cleanBase)|\(token)"
+        refreshLock.lock()
+        let refreshTask: Task<LoginResponse, Error>
+        if let existing = inFlightRefreshes[refreshKey] {
+            refreshTask = existing
+            refreshLock.unlock()
+        } else {
+            let task = Task<LoginResponse, Error> {
+                defer {
+                    self.refreshLock.lock()
+                    _ = self.inFlightRefreshes.removeValue(forKey: refreshKey)
+                    self.refreshLock.unlock()
+                }
+                return try await self.refreshSession(baseUrl: cleanBase, token: token)
+            }
+            inFlightRefreshes[refreshKey] = task
+            refreshTask = task
+            refreshLock.unlock()
+        }
+
+        do {
+            let refreshed = try await refreshTask.value
+            if let newToken = refreshed.token, !newToken.isEmpty {
+                var shouldNotify = false
+                refreshLock.lock()
+                // Re-verify session hasn't been logged out or switched while refresh was running
+                if let current = SessionStore.load(),
+                   cleanUrl(current.baseUrl) == cleanBase,
+                   current.token == token {
+                    SessionStore.save(baseUrl: cleanBase, token: newToken, generation: current.generation)
+                    shouldNotify = true
+                }
+                refreshLock.unlock()
+
+                if shouldNotify {
+                    onTokenRefreshed?(cleanBase, token, refreshed)
+                    // Retry request ONLY if target URL starts with the matching server baseUrl
+                    if let reqUrl = request.url?.absoluteString, reqUrl.hasPrefix(cleanBase) {
+                        var retry = request
+                        retry.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+                        return try await session.data(for: retry)
+                    }
+                }
+            }
+        } catch ApiError.serverError(let code, _) where code == 401 || code == 403 {
+            var shouldNotify = false
+            refreshLock.lock()
+            if let current = SessionStore.load(),
+               cleanUrl(current.baseUrl) == cleanBase,
+               current.token == token {
+                SessionStore.clear()
+                shouldNotify = true
+            }
+            refreshLock.unlock()
+
+            if shouldNotify {
+                onSessionRejected?(cleanBase, token)
+            }
+        } catch {
+            // Keep original 401 response on transient network errors
+        }
+
         return (data, response)
     }
 
@@ -232,7 +293,7 @@ public final class ApiClient {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         let res = try? JSONDecoder().decode(VoicemailResponse.self, from: data)
         guard (200...299).contains(status), let res = res, res.success else {
@@ -253,7 +314,7 @@ public final class ApiClient {
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["action": action, "id": id])
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         let res = try? JSONDecoder().decode(VoicemailResponse.self, from: data)
         guard (200...299).contains(status), let res = res, res.success else {
@@ -273,7 +334,7 @@ public final class ApiClient {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         guard (200...299).contains(status), !data.isEmpty else {
             throw ApiError.custom(L("The message could not be played"))
@@ -294,7 +355,7 @@ public final class ApiClient {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw ApiError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500, message: L("Could not load history"))
         }
@@ -314,7 +375,7 @@ public final class ApiClient {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw ApiError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500, message: L("Could not load contacts"))
         }
@@ -335,7 +396,7 @@ public final class ApiClient {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw ApiError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500, message: L("Could not get settings"))
         }
@@ -367,7 +428,7 @@ public final class ApiClient {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw ApiError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500, message: L("Update failed"))
         }
@@ -388,7 +449,7 @@ public final class ApiClient {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw ApiError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500, message: L("Could not get chats"))
         }
@@ -411,7 +472,7 @@ public final class ApiClient {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw ApiError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500, message: L("Could not get messages"))
         }
@@ -436,7 +497,7 @@ public final class ApiClient {
         let body = ["target_extension": targetExt]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw ApiError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500, message: L("Could not create the chat"))
         }
@@ -469,7 +530,7 @@ public final class ApiClient {
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
         request.httpBody = body
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         let res = try? JSONDecoder().decode(ChatUploadResponse.self, from: data)
         guard (200...299).contains(status), let res = res, res.success else {
@@ -496,7 +557,7 @@ public final class ApiClient {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw ApiError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500, message: L("Could not create the group"))
         }
@@ -518,7 +579,7 @@ public final class ApiClient {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         let res = try? JSONDecoder().decode(GroupChatResponse.self, from: data)
         guard (200...299).contains(status), let res = res, res.success, let conv = res.conversation else {
@@ -543,7 +604,7 @@ public final class ApiClient {
             "description": description
         ])
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         let res = try? JSONDecoder().decode(GroupChatResponse.self, from: data)
         guard (200...299).contains(status), let res = res, res.success, let conv = res.conversation else {
@@ -567,7 +628,7 @@ public final class ApiClient {
             "extensions": extensions
         ])
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         let res = try? JSONDecoder().decode(GroupMembersAddedResponse.self, from: data)
         guard (200...299).contains(status), let res = res, res.success else {
@@ -591,7 +652,7 @@ public final class ApiClient {
             "extension": extensionNumber
         ])
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         let res = try? JSONDecoder().decode(GenericActionResponse.self, from: data)
         guard (200...299).contains(status), let res = res, res.success else {
@@ -616,7 +677,7 @@ public final class ApiClient {
             "role": role
         ])
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         let res = try? JSONDecoder().decode(GenericActionResponse.self, from: data)
         guard (200...299).contains(status), let res = res, res.success else {
@@ -637,7 +698,7 @@ public final class ApiClient {
         request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["conversation_id": convId])
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         let res = try? JSONDecoder().decode(GenericActionResponse.self, from: data)
         guard (200...299).contains(status), let res = res, res.success else {
@@ -660,7 +721,7 @@ public final class ApiClient {
         let body = ["conversation_id": convId]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await performAuthenticated(request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             throw ApiError.serverError(statusCode: (response as? HTTPURLResponse)?.statusCode ?? 500, message: L("Could not leave the group"))
         }

@@ -59,23 +59,29 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
         SipWebRtcEngine.shared.delegate = self
         ChatWebSocketManager.shared.delegate = self
 
-        ApiClient.shared.onTokenRefreshed = { [weak self] res in
+        ApiClient.shared.onTokenRefreshed = { [weak self] refreshedBaseUrl, oldToken, res in
             Task { @MainActor in
+                guard let self = self,
+                      self.cleanUrl(self.baseUrl) == self.cleanUrl(refreshedBaseUrl),
+                      self.token == oldToken else { return }
                 if let newTok = res.token, !newTok.isEmpty {
-                    self?.token = newTok
+                    self.token = newTok
                 }
                 if let user = res.user {
-                    self?.userProfile = user
+                    self.userProfile = user
                 }
                 if let sip = res.sip {
-                    self?.sipCredentials = sip
+                    self.sipCredentials = sip
                 }
             }
         }
 
-        ApiClient.shared.onSessionRejected = { [weak self] in
+        ApiClient.shared.onSessionRejected = { [weak self] rejectedBaseUrl, rejectedToken in
             Task { @MainActor in
-                self?.logout()
+                guard let self = self,
+                      self.cleanUrl(self.baseUrl) == self.cleanUrl(rejectedBaseUrl),
+                      self.token == rejectedToken else { return }
+                self.logout()
             }
         }
 
@@ -210,6 +216,24 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
         }
     }
 
+    private func cleanUrl(_ url: String) -> String {
+        return url.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    public struct PendingAuthFlow {
+        public let serverUrl: String
+        public let startedAt: Date
+        public var isValid: Bool {
+            Date().timeIntervalSince(startedAt) < 300 // 5 minutes validity
+        }
+    }
+    public var activeAuthFlow: PendingAuthFlow?
+
+    public func startExternalAuth(serverUrl: String) {
+        let clean = cleanUrl(serverUrl)
+        activeAuthFlow = PendingAuthFlow(serverUrl: clean, startedAt: Date())
+    }
+
     public func handleDeepLinkUrl(_ url: URL) {
         guard url.scheme == "aipbx",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
@@ -232,20 +256,31 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
             pendingLinkLogin = PendingLinkLogin(serverUrl: server, token: token)
 
         case "auth":
-            // Returning from Google sign-in: the server no longer sends the
-            // sign-in data (token + SIP password) in the URL; a single-use code
-            // is exchanged on the server where we started the sign-in.
+            // Returning from external OAuth (Google / SAML / OIDC)
+            guard let flow = activeAuthFlow, flow.isValid else {
+                errorMessage = L("Google sign-in could not be completed. Please try again.")
+                activeAuthFlow = nil
+                return
+            }
+            activeAuthFlow = nil
+
             if param("success") == "1" {
                 guard let code = param("code"), !code.isEmpty else {
                     errorMessage = L("Google sign-in could not be completed. Please try again.")
                     return
                 }
-                let server = baseUrl
-                Task { @MainActor in
-                    _ = await self.loginWithQr(serverUrl: server, qrToken: code)
+                let targetServer = flow.serverUrl
+                if isLoggedIn {
+                    // Prompt for confirmation before switching account if already logged in
+                    pendingLinkLogin = PendingLinkLogin(serverUrl: targetServer, token: code)
+                } else {
+                    Task { @MainActor in
+                        _ = await self.loginWithQr(serverUrl: targetServer, qrToken: code)
+                    }
                 }
             } else {
-                errorMessage = param("error") ?? L("Google sign-in failed.")
+                // Do not display raw, untrusted external error text
+                errorMessage = L("Google sign-in failed.")
             }
 
         default:
@@ -273,6 +308,9 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
     }
 
     public func logout() {
+        restoreTask?.cancel()
+        restoreTask = nil
+        activeAuthFlow = nil
         if let tok = token, !tok.isEmpty {
             PushRegistrationManager.shared.unregister(baseUrl: baseUrl, token: tok)
         }
@@ -312,11 +350,21 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
             defer { if !self.isLoggedIn { self.isLoading = false } }
             do {
                 let res = try await ApiClient.shared.refreshSession(baseUrl: saved.baseUrl, token: saved.token)
+                guard let currentSaved = SessionStore.load(),
+                      currentSaved.token == saved.token,
+                      self.cleanUrl(currentSaved.baseUrl) == self.cleanUrl(saved.baseUrl) else {
+                    AppLogManager.shared.info("AppState", "Session changed or cleared during restore; ignoring stale response")
+                    return false
+                }
                 await self.handleLoginSuccess(res: res, serverUrl: saved.baseUrl)
                 AppLogManager.shared.info("AppState", "Session restored")
                 return true
             } catch ApiError.serverError(let code, _) where code == 401 || code == 403 {
-                SessionStore.clear()
+                if let currentSaved = SessionStore.load(),
+                   currentSaved.token == saved.token,
+                   self.cleanUrl(currentSaved.baseUrl) == self.cleanUrl(saved.baseUrl) {
+                    SessionStore.clear()
+                }
                 AppLogManager.shared.warn("AppState", "Saved session rejected (\(code)); sign-in needed")
                 return false
             } catch {

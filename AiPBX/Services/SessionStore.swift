@@ -13,10 +13,17 @@ public enum SessionStore {
     public struct Saved: Codable {
         public let baseUrl: String
         public let token: String
+        public let generation: String?
+
+        public init(baseUrl: String, token: String, generation: String? = nil) {
+            self.baseUrl = baseUrl
+            self.token = token
+            self.generation = generation
+        }
     }
 
-    public static func save(baseUrl: String, token: String) {
-        guard let data = try? JSONEncoder().encode(Saved(baseUrl: baseUrl, token: token)) else { return }
+    public static func save(baseUrl: String, token: String, generation: String? = nil) {
+        guard let data = try? JSONEncoder().encode(Saved(baseUrl: baseUrl, token: token, generation: generation)) else { return }
         clear()
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

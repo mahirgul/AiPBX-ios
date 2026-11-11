@@ -15,6 +15,8 @@ targets:
       base:
         PRODUCT_NAME: AiPBX
         PRODUCT_BUNDLE_IDENTIFIER: com.mhrgl.AiPBX
+        MARKETING_VERSION: "1.50.35"
+        CURRENT_PROJECT_VERSION: "75"
         INFOPLIST_FILE: AiPBX/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: AiPBX/Resources/AiPBX.entitlements
         TARGETED_DEVICE_FAMILY: "1"
