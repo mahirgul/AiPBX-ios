@@ -307,7 +307,7 @@
 
         function initUA(wsUrl, sipUsername, password, domain, displayName, turnUrl, turnUser, turnPass) {
             try {
-                var configKey = wsUrl + "|" + sipUsername + "|" + domain;
+                var configKey = JSON.stringify([wsUrl, sipUsername, password, domain, turnUrl, turnUser, turnPass]);
 
                 if (ua && currentConfigKey === configKey) {
                     if (ua.isConnected && ua.isConnected()) {
@@ -777,6 +777,8 @@
 
         function destroyUA() {
             cleanupMedia();
+            currentConfigKey = "";
+            currentSession = null;
             if (ua) {
                 ua.stop();
                 ua = null;

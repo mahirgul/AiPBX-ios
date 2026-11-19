@@ -59,13 +59,17 @@ public final class CallKitManager: NSObject, CXProviderDelegate {
         update.supportsGrouping = false
         update.supportsUngrouping = false
 
-        provider.reportNewIncomingCall(with: uuid, update: update) { error in
-            if let error = error {
-                AppLogManager.shared.error("CallKit", "Failed to report incoming call: \(error.localizedDescription)")
-            } else {
-                AppLogManager.shared.info("CallKit", "Reported incoming call for \(callerName) (\(callerNumber))")
+        provider.reportNewIncomingCall(with: uuid, update: update) { [weak self] error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    if self?.currentCallUUID == uuid { self?.currentCallUUID = nil }
+                    if self?.pushCallUUID == uuid { self?.clearPushCall() }
+                    AppLogManager.shared.error("CallKit", "Failed to report incoming call: \(error.localizedDescription)")
+                } else {
+                    AppLogManager.shared.info("CallKit", "Reported incoming call for \(callerName) (\(callerNumber))")
+                }
+                completion?(error)
             }
-            completion?(error)
         }
     }
 
@@ -85,12 +89,7 @@ public final class CallKitManager: NSObject, CXProviderDelegate {
         pushCallUUID = uuid
         pushCallAnswered = false
         pushCallDeclinedUntil = nil
-        reportIncomingCall(uuid: uuid, callerName: callerName, callerNumber: callerNumber) { [weak self] error in
-            if error != nil {
-                self?.clearPushCall()
-            }
-            completion(error)
-        }
+        reportIncomingCall(uuid: uuid, callerName: callerName, callerNumber: callerNumber, completion: completion)
 
         let timeout = DispatchWorkItem { [weak self] in
             guard let self = self, self.pushCallUUID == uuid else { return }
@@ -144,14 +143,19 @@ public final class CallKitManager: NSObject, CXProviderDelegate {
         pushCallAnswered = false
     }
 
-    public func startOutgoingCall(uuid: UUID, handle: String) {
+    public func startOutgoingCall(uuid: UUID, handle: String, onFailure: @escaping () -> Void) {
         currentCallUUID = uuid
         let handleObj = CXHandle(type: .generic, value: handle)
         let action = CXStartCallAction(call: uuid, handle: handleObj)
         let transaction = CXTransaction(action: action)
 
-        callController.request(transaction) { error in
+        callController.request(transaction) { [weak self] error in
             if let error = error {
+                DispatchQueue.main.async {
+                    guard self?.currentCallUUID == uuid else { return }
+                    self?.currentCallUUID = nil
+                    onFailure()
+                }
                 AppLogManager.shared.error("CallKit", "Failed to start outgoing call: \(error.localizedDescription)")
             } else {
                 AppLogManager.shared.info("CallKit", "Started outgoing call to \(handle)")
@@ -187,7 +191,7 @@ public final class CallKitManager: NSObject, CXProviderDelegate {
 
     public func providerDidReset(_ provider: CXProvider) {
         AppLogManager.shared.info("CallKit", "Provider did reset")
-        AudioSessionManager.shared.endAudioSession()
+        AudioSessionManager.shared.callKitDidDeactivate()
         currentCallUUID = nil
         clearPushCall()
     }
@@ -246,11 +250,11 @@ public final class CallKitManager: NSObject, CXProviderDelegate {
 
     public func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
         AppLogManager.shared.info("CallKit", "Audio session activated by CallKit")
-        AudioSessionManager.shared.activateAudioSession()
+        AudioSessionManager.shared.callKitDidActivate()
     }
 
     public func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
         AppLogManager.shared.info("CallKit", "Audio session deactivated by CallKit")
-        AudioSessionManager.shared.endAudioSession()
+        AudioSessionManager.shared.callKitDidDeactivate()
     }
 }

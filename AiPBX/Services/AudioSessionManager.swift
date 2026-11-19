@@ -21,18 +21,19 @@ public final class AudioSessionManager: NSObject, ObservableObject {
         }
     }
 
-    public func activateAudioSession() {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .allowBluetoothA2DP])
-            try session.setActive(true)
-            AppLogManager.shared.info("AudioSession", "AVAudioSession activated for voice call")
-        } catch {
-            AppLogManager.shared.error("AudioSession", "Failed to activate audio session: \(error.localizedDescription)")
-        }
+    private var callKitOwnsAudioSession = false
+
+    public func callKitDidActivate() {
+        callKitOwnsAudioSession = true
+    }
+
+    public func callKitDidDeactivate() {
+        callKitOwnsAudioSession = false
+        endAudioSession()
     }
 
     public func endAudioSession() {
+        guard !callKitOwnsAudioSession else { return }
         let session = AVAudioSession.sharedInstance()
         do {
             try session.overrideOutputAudioPort(.none)

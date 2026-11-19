@@ -54,6 +54,9 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
     public let chatMessageDeleted = PassthroughSubject<ChatMessageDeletion, Never>()
 
     private var cancellables = Set<AnyCancellable>()
+    /// Monotonic counter incremented on every login and logout to discard stale in-flight responses.
+    private var sessionGeneration: UInt64 = 0
+    private var sipRegistrationPending = false
 
     private init() {
         SipWebRtcEngine.shared.delegate = self
@@ -66,12 +69,16 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
                       self.token == oldToken else { return }
                 if let newTok = res.token, !newTok.isEmpty {
                     self.token = newTok
+                    ChatWebSocketManager.shared.updateReconnectToken(baseUrl: self.baseUrl, token: newTok)
+                    PushRegistrationManager.shared.uploadIfPossible()
                 }
                 if let user = res.user {
                     self.userProfile = user
                 }
                 if let sip = res.sip {
                     self.sipCredentials = sip
+                    self.sipRegistrationPending = true
+                    self.applyPendingSipRegistration()
                 }
             }
         }
@@ -158,6 +165,8 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
     }
 
     public func handleLoginSuccess(res: LoginResponse, serverUrl: String) async {
+        sessionGeneration &+= 1
+        sipRegistrationPending = false
         self.baseUrl = serverUrl
         self.token = res.token
         self.userProfile = res.user
@@ -308,6 +317,8 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
     }
 
     public func logout() {
+        sessionGeneration &+= 1
+        sipRegistrationPending = false
         restoreTask?.cancel()
         restoreTask = nil
         activeAuthFlow = nil
@@ -387,36 +398,61 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
             }
             return
         }
+        if sipRegistrationPending {
+            applyPendingSipRegistration()
+            return
+        }
         if let sip = sipCredentials {
             let dName = userProfile?.fullName ?? userProfile?.username ?? sip.sipUsername
             SipWebRtcEngine.shared.register(sip: sip, displayName: dName)
         }
     }
 
+    private func applyPendingSipRegistration() {
+        guard sipRegistrationPending, isLoggedIn, let sip = sipCredentials,
+              callStatus == .idle || callStatus == .ended else { return }
+        sipRegistrationPending = false
+        let name = userProfile?.fullName ?? userProfile?.username ?? sip.sipUsername
+        SipWebRtcEngine.shared.register(sip: sip, displayName: name)
+    }
+
     // MARK: - Data Synchronization
+
+    /// Same login on the same server. The token is not compared: a refresh during the
+    /// request changes it inside the same session, and that answer is still ours.
+    private func isCurrentSession(_ gen: UInt64, serverUrl: String, token: String) -> Bool {
+        return isLoggedIn && sessionGeneration == gen && self.baseUrl == serverUrl
+    }
 
     public func refreshAllData() async {
         guard let token = token else { return }
+        let gen = sessionGeneration
+        let url = baseUrl
 
-        async let histTask = ApiClient.shared.getCallHistory(baseUrl: baseUrl, token: token)
-        async let contactsTask = ApiClient.shared.getContacts(baseUrl: baseUrl, token: token)
-        async let convsTask = ApiClient.shared.getChatConversations(baseUrl: baseUrl, token: token)
-        async let featTask = ApiClient.shared.getFeatures(baseUrl: baseUrl, token: token)
-        async let vmTask = ApiClient.shared.getVoicemail(baseUrl: baseUrl, token: token)
+        async let histTask = ApiClient.shared.getCallHistory(baseUrl: url, token: token)
+        async let contactsTask = ApiClient.shared.getContacts(baseUrl: url, token: token)
+        async let convsTask = ApiClient.shared.getChatConversations(baseUrl: url, token: token)
+        async let featTask = ApiClient.shared.getFeatures(baseUrl: url, token: token)
+        async let vmTask = ApiClient.shared.getVoicemail(baseUrl: url, token: token)
 
         if let historyRes = try? await histTask {
+            guard isCurrentSession(gen, serverUrl: url, token: token) else { return }
             self.callHistory = historyRes.calls ?? []
         }
         if let contactsRes = try? await contactsTask {
+            guard isCurrentSession(gen, serverUrl: url, token: token) else { return }
             self.contacts = contactsRes
         }
         if let convsRes = try? await convsTask {
+            guard isCurrentSession(gen, serverUrl: url, token: token) else { return }
             self.conversations = convsRes
         }
         if let featRes = try? await featTask {
+            guard isCurrentSession(gen, serverUrl: url, token: token) else { return }
             self.features = featRes
         }
         if let vmRes = try? await vmTask {
+            guard isCurrentSession(gen, serverUrl: url, token: token) else { return }
             let msgs = vmRes.messages ?? []
             self.voicemailMessages = msgs
             self.newVoicemailCount = vmRes.newCount ?? msgs.filter { $0.isNew }.count
@@ -425,7 +461,10 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
 
     public func refreshVoicemail() async {
         guard let token = token else { return }
-        if let vmRes = try? await ApiClient.shared.getVoicemail(baseUrl: baseUrl, token: token) {
+        let gen = sessionGeneration
+        let url = baseUrl
+        if let vmRes = try? await ApiClient.shared.getVoicemail(baseUrl: url, token: token) {
+            guard isCurrentSession(gen, serverUrl: url, token: token) else { return }
             let msgs = vmRes.messages ?? []
             self.voicemailMessages = msgs
             self.newVoicemailCount = vmRes.newCount ?? msgs.filter { $0.isNew }.count
@@ -434,16 +473,21 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
 
     public func refreshCallHistory() async {
         guard let token = token else { return }
-        if let historyRes = try? await ApiClient.shared.getCallHistory(baseUrl: baseUrl, token: token) {
+        let gen = sessionGeneration
+        let url = baseUrl
+        if let historyRes = try? await ApiClient.shared.getCallHistory(baseUrl: url, token: token) {
+            guard isCurrentSession(gen, serverUrl: url, token: token) else { return }
             self.callHistory = historyRes.calls ?? []
         }
     }
 
     public func updateFeatures(_ settings: FeatureSettings) async {
         guard let token = token else { return }
+        let gen = sessionGeneration
+        let url = baseUrl
         do {
-            let success = try await ApiClient.shared.updateFeatures(baseUrl: baseUrl, token: token, settings: settings)
-            if success {
+            let success = try await ApiClient.shared.updateFeatures(baseUrl: url, token: token, settings: settings)
+            if success && isCurrentSession(gen, serverUrl: url, token: token) {
                 self.features = settings
                 AppLogManager.shared.info("AppState", "Features updated successfully")
             }
@@ -460,6 +504,7 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
 
     public func makeCall(to target: String, withVideo: Bool = false) {
         guard !target.isEmpty else { return }
+        applyPendingSipRegistration()
         self.activeCallerName = target
         self.activeCallerNumber = target
         self.isCallSheetPresented = true
@@ -523,6 +568,7 @@ public final class AppState: ObservableObject, SipWebRtcEngineDelegate, ChatWebS
             if status == .ringingIncoming || status == .connecting || status == .active || status == .onHold {
                 self.isCallSheetPresented = true
             } else if status == .ended || status == .idle {
+                self.applyPendingSipRegistration()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                     if self.callStatus == .idle || self.callStatus == .ended {
                         self.isCallSheetPresented = false

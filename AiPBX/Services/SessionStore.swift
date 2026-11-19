@@ -24,17 +24,24 @@ public enum SessionStore {
 
     public static func save(baseUrl: String, token: String, generation: String? = nil) {
         guard let data = try? JSONEncoder().encode(Saved(baseUrl: baseUrl, token: token, generation: generation)) else { return }
-        clear()
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account
+        ]
+        // Readable while locked after the first unlock, for incoming calls.
+        let attributes: [String: Any] = [
             kSecValueData as String: data,
-            // Readable while the phone is locked (after the first unlock since
-            // boot): a call can arrive with the screen locked.
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
-        let status = SecItemAdd(query as CFDictionary, nil)
+        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            let item = query.merging(attributes) { _, value in value }
+            status = SecItemAdd(item as CFDictionary, nil)
+            if status == errSecDuplicateItem {
+                status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+            }
+        }
         if status != errSecSuccess {
             AppLogManager.shared.warn("SessionStore", "Could not save the session (\(status))")
         }

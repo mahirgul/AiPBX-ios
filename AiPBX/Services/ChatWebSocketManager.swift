@@ -23,6 +23,7 @@ public final class ChatWebSocketManager: NSObject, ObservableObject, URLSessionW
     private var pingTimer: Timer?
     private var isManuallyClosed: Bool = false
     private var reconnectAttempts: Int = 0
+    private var reconnectWork: DispatchWorkItem?
 
     private override init() {
         super.init()
@@ -64,24 +65,26 @@ public final class ChatWebSocketManager: NSObject, ObservableObject, URLSessionW
         webSocketTask = session?.webSocketTask(with: wsUrl)
         webSocketTask?.resume()
 
-        listenForMessages()
+        if let task = webSocketTask { listenForMessages(task) }
         schedulePing()
     }
 
+    public func updateReconnectToken(baseUrl: String, token: String) {
+        if currentBaseUrl == baseUrl { currentToken = token }
+    }
+
     public func disconnect(manual: Bool = true) {
+        reconnectWork?.cancel()
+        reconnectWork = nil
+        if manual { reconnectAttempts = 0 }
         isManuallyClosed = manual
-        DispatchQueue.main.async {
-            self.pingTimer?.invalidate()
-            self.pingTimer = nil
-        }
-
-        webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        pingTimer?.invalidate()
+        pingTimer = nil
+        let previous = webSocketTask
         webSocketTask = nil
-
-        DispatchQueue.main.async {
-            self.isConnected = false
-            self.delegate?.webSocketDidUpdateConnectionState(false)
-        }
+        previous?.cancel(with: .normalClosure, reason: nil)
+        isConnected = false
+        delegate?.webSocketDidUpdateConnectionState(false)
         AppLogManager.shared.info("ChatWS", "WebSocket disconnected")
     }
 
@@ -153,58 +156,54 @@ public final class ChatWebSocketManager: NSObject, ObservableObject, URLSessionW
         }
     }
 
-    private func listenForMessages() {
-        webSocketTask?.receive { [weak self] result in
-            guard let self = self else { return }
-            switch result {
-            case .success(let message):
-                self.reconnectAttempts = 0
-                DispatchQueue.main.async {
+    private func listenForMessages(_ task: URLSessionWebSocketTask) {
+        task.receive { [weak self, weak task] result in
+            DispatchQueue.main.async {
+                guard let self = self, let task = task, task === self.webSocketTask else { return }
+                switch result {
+                case .success(let message):
+                    self.reconnectAttempts = 0
                     if !self.isConnected {
                         self.isConnected = true
                         self.delegate?.webSocketDidUpdateConnectionState(true)
                     }
-                }
-                switch message {
-                case .string(let text):
-                    self.handleIncomingText(text)
-                case .data(let data):
-                    if let text = String(data: data, encoding: .utf8) {
+                    switch message {
+                    case .string(let text):
                         self.handleIncomingText(text)
+                    case .data(let data):
+                        if let text = String(data: data, encoding: .utf8) {
+                            self.handleIncomingText(text)
+                        }
+                    @unknown default:
+                        break
                     }
-                @unknown default:
-                    break
-                }
-                self.listenForMessages()
-
-            case .failure(let error):
-                AppLogManager.shared.warn("ChatWS", "Receive error: \(error.localizedDescription)")
-                DispatchQueue.main.async {
+                    self.listenForMessages(task)
+                case .failure(let error):
+                    AppLogManager.shared.warn("ChatWS", "Receive error: \(error.localizedDescription)")
                     self.isConnected = false
                     self.delegate?.webSocketDidUpdateConnectionState(false)
-                }
-                if !self.isManuallyClosed {
-                    self.reconnect()
+                    self.reconnect(task)
                 }
             }
         }
     }
 
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
-        guard webSocketTask === self.webSocketTask else { return }
-        reconnectAttempts = 0
-        schedulePing()
         DispatchQueue.main.async {
+            guard webSocketTask === self.webSocketTask else { return }
+            self.reconnectAttempts = 0
+            self.schedulePing()
             self.isConnected = true
             self.delegate?.webSocketDidUpdateConnectionState(true)
         }
     }
 
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
-        guard webSocketTask === self.webSocketTask else { return }
         DispatchQueue.main.async {
+            guard webSocketTask === self.webSocketTask else { return }
             self.isConnected = false
             self.delegate?.webSocketDidUpdateConnectionState(false)
+            self.reconnect(webSocketTask)
         }
     }
 
@@ -293,12 +292,18 @@ public final class ChatWebSocketManager: NSObject, ObservableObject, URLSessionW
         }
     }
 
-    private func reconnect() {
+    private func reconnect(_ task: URLSessionWebSocketTask) {
+        guard !isManuallyClosed, reconnectWork == nil else { return }
         reconnectAttempts += 1
         let delay = min(Double(reconnectAttempts * 2), 20.0)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self = self, !self.isManuallyClosed else { return }
-            self.connect(baseUrl: self.currentBaseUrl, token: self.currentToken)
+        let work = DispatchWorkItem { [weak self, weak task] in
+            guard let self = self, let task = task, task === self.webSocketTask else { return }
+            self.reconnectWork = nil
+            if !self.isManuallyClosed {
+                self.connect(baseUrl: self.currentBaseUrl, token: self.currentToken)
+            }
         }
+        reconnectWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 }

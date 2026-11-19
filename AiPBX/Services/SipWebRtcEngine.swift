@@ -117,7 +117,9 @@ public final class SipWebRtcEngine: NSObject, ObservableObject, WKScriptMessageH
 
         AudioSessionManager.shared.configureAudioSessionForCall()
         let callUUID = UUID()
-        CallKitManager.shared.startOutgoingCall(uuid: callUUID, handle: target)
+        CallKitManager.shared.startOutgoingCall(uuid: callUUID, handle: target) { [weak self] in
+            self?.terminateCall()
+        }
 
         let turnUrl = sip.turn?.urls?.first ?? ""
         let turnUser = sip.turn?.username ?? ""
@@ -226,6 +228,9 @@ public final class SipWebRtcEngine: NSObject, ObservableObject, WKScriptMessageH
     }
 
     public func unregister() {
+        pendingRegistration = nil
+        lastSipCredentials = nil
+        lastDisplayName = nil
         evaluateJs("destroyUA();")
         DispatchQueue.main.async {
             self.connectionStatus = .disconnected
@@ -344,6 +349,11 @@ public final class SipWebRtcEngine: NSObject, ObservableObject, WKScriptMessageH
             // The engine sends "" when the caller has no display name: show the number then.
             let rawName = (body["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let name = !rawName.isEmpty ? rawName : (!number.isEmpty ? number : L("Unknown Number"))
+            let decision = CallKitManager.shared.handleIncomingInvite(callerName: name, callerNumber: number)
+            if case .reject = decision {
+                evaluateJs("rejectCall();")
+                break
+            }
             DispatchQueue.main.async {
                 self.activeCallerName = name
                 self.activeCallerNumber = number
@@ -352,18 +362,14 @@ public final class SipWebRtcEngine: NSObject, ObservableObject, WKScriptMessageH
                 self.delegate?.engineDidUpdateCallStatus(.ringingIncoming)
             }
             AppLogManager.shared.info("SipEngine", "Incoming call: \(name) (\(number))")
-            switch CallKitManager.shared.handleIncomingInvite(callerName: name, callerNumber: number) {
+            switch decision {
             case .ring:
                 break
             case .answer:
                 // Answered on the CallKit screen while the INVITE was on its way.
                 answerCall()
             case .reject:
-                evaluateJs("rejectCall();")
-                DispatchQueue.main.async {
-                    self.callStatus = .idle
-                    self.delegate?.engineDidUpdateCallStatus(.idle)
-                }
+                break
             }
 
         case "onRemoteAudioPlaying":

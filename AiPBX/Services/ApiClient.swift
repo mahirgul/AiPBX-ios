@@ -767,7 +767,7 @@ public final class ApiClient {
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         guard (200...299).contains(status) else {
             throw ApiError.serverError(statusCode: status, message: L("Could not update the call history"))
@@ -791,7 +791,7 @@ public final class ApiClient {
         let body: [String: Any] = ["conversation_id": convId, "msg_type": "text", "message": text]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         guard (200...299).contains(status), json?["success"] as? Bool == true else {
@@ -817,7 +817,7 @@ public final class ApiClient {
         let body: [String: Any] = ["conversation_id": convId, "last_message_id": lastMessageId]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         guard (200...299).contains(status) else {
             throw ApiError.serverError(statusCode: status, message: L("Could not get messages"))
@@ -840,7 +840,7 @@ public final class ApiClient {
         let body: [String: Any] = ["message_id": messageId]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         if (200...299).contains(status) || status == 409 {
             return
@@ -881,7 +881,7 @@ public final class ApiClient {
     /// Registers this iPhone for push: the APNs token (chat, test) and the
     /// PushKit VoIP token (incoming calls). Same endpoint as Android's FCM token.
     public func registerPushDevice(baseUrl: String, token: String, deviceId: String, apnsToken: String?,
-                                   voipToken: String?, deviceName: String, appVersion: String) async throws {
+                                   voipToken: String?, deviceName: String, appVersion: String, clearVoipToken: Bool = false) async throws {
         let base = cleanUrl(baseUrl)
         guard let url = URL(string: "\(base)/api/mobile/fcm_token.php") else {
             throw ApiError.invalidUrl
@@ -902,10 +902,12 @@ public final class ApiClient {
         ]
         if let voip = voipToken {
             body["voip_token"] = voip
+        } else if clearVoipToken {
+            body["voip_token"] = ""
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await performAuthenticated(request, baseUrl: base, token: token)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
         guard (200...299).contains(status) else {
             throw ApiError.serverError(statusCode: status, message: "")

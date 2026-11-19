@@ -15,6 +15,8 @@ public final class PushRegistrationManager: NSObject, PKPushRegistryDelegate {
     private var voipToken: String?
     /// The token pair last accepted by the server, so a relaunch does not re-send it.
     private var lastSent: String?
+    private var deviceTransaction: Task<Void, Never>?
+    private var clearVoipToken = false
 
     private override init() {
         super.init()
@@ -37,28 +39,35 @@ public final class PushRegistrationManager: NSObject, PKPushRegistryDelegate {
     }
 
     public func didReceiveApnsToken(_ data: Data) {
-        apnsToken = data.map { String(format: "%02.2hhx", $0) }.joined()
-        AppLogManager.shared.info("Push", "APNs token received")
-        uploadIfPossible()
+        Task { @MainActor in
+            apnsToken = data.map { String(format: "%02.2hhx", $0) }.joined()
+            AppLogManager.shared.info("Push", "APNs token received")
+            uploadIfPossible()
+        }
     }
 
     /// Sends the tokens when signed in. Called on sign-in and whenever a token changes.
+    @MainActor
     public func uploadIfPossible() {
-        Task { @MainActor in
-            let state = AppState.shared
-            guard state.isLoggedIn, let token = state.token, !token.isEmpty else { return }
-            guard apnsToken != nil || voipToken != nil else { return }
-
-            let key = "\(state.baseUrl)|\(token)|\(apnsToken ?? "")|\(voipToken ?? "")"
-            if key == lastSent { return }
-
+        let state = AppState.shared
+        guard state.isLoggedIn, let token = state.token, !token.isEmpty else { return }
+        guard apnsToken != nil || voipToken != nil || clearVoipToken else { return }
+        let base = state.baseUrl
+        let id = deviceId
+        let apns = apnsToken
+        let voip = voipToken
+        let clear = clearVoipToken
+        let key = "\(base)|\(token)|\(apns ?? "")|\(voip ?? "")|\(clear)"
+        let previous = deviceTransaction
+        deviceTransaction = Task { @MainActor in
+            await previous?.value
+            guard state.isLoggedIn, state.baseUrl == base, state.token == token, key != lastSent else { return }
             let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
             do {
                 try await ApiClient.shared.registerPushDevice(
-                    baseUrl: state.baseUrl, token: token, deviceId: deviceId,
-                    apnsToken: apnsToken, voipToken: voipToken,
-                    deviceName: UIDevice.current.name, appVersion: version)
-                lastSent = key
+                    baseUrl: base, token: token, deviceId: id, apnsToken: apns, voipToken: voip,
+                    deviceName: UIDevice.current.name, appVersion: version, clearVoipToken: clear)
+                if state.isLoggedIn && state.baseUrl == base && state.token == token { lastSent = key }
                 AppLogManager.shared.info("Push", "Push tokens registered with the PBX")
             } catch {
                 AppLogManager.shared.warn("Push", "Could not register push tokens: \(error.localizedDescription)")
@@ -71,8 +80,11 @@ public final class PushRegistrationManager: NSObject, PKPushRegistryDelegate {
     public func unregister(baseUrl: String, token: String) {
         lastSent = nil
         let id = deviceId
-        Task {
+        let previous = deviceTransaction
+        deviceTransaction = Task { @MainActor in
+            await previous?.value
             try? await ApiClient.shared.unregisterPushDevice(baseUrl: baseUrl, token: token, deviceId: id)
+            lastSent = nil
         }
     }
 
@@ -80,15 +92,24 @@ public final class PushRegistrationManager: NSObject, PKPushRegistryDelegate {
 
     public func pushRegistry(_ registry: PKPushRegistry, didUpdate pushCredentials: PKPushCredentials, for type: PKPushType) {
         guard type == .voIP else { return }
-        voipToken = pushCredentials.token.map { String(format: "%02.2hhx", $0) }.joined()
-        AppLogManager.shared.info("Push", "VoIP push token received")
-        uploadIfPossible()
+        let token = pushCredentials.token
+        Task { @MainActor in
+            voipToken = token.map { String(format: "%02.2hhx", $0) }.joined()
+            clearVoipToken = false
+            AppLogManager.shared.info("Push", "VoIP push token received")
+            uploadIfPossible()
+        }
     }
 
     public func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {
         guard type == .voIP else { return }
-        voipToken = nil
-        AppLogManager.shared.warn("Push", "VoIP push token invalidated")
+        Task { @MainActor in
+            voipToken = nil
+            clearVoipToken = true
+            lastSent = nil
+            AppLogManager.shared.warn("Push", "VoIP push token invalidated")
+            uploadIfPossible()
+        }
     }
 
     public func pushRegistry(_ registry: PKPushRegistry, didReceiveIncomingPushWith payload: PKPushPayload,
